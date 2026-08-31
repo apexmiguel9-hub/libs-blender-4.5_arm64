@@ -1,9 +1,7 @@
 #!/bin/bash
-# Build zstd for Android ARM64
 set -euo pipefail
 NDK_DIR="$1"; OUTPUT_DIR="$2"; BUILD_DIR="$3"; API_LEVEL="${4:-24}"
 mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
-git clone --depth 1 --branch v1.5.6 https://github.com/facebook/zlib.git src 2>/dev/null || \
 git clone --depth 1 --branch v1.5.6 https://github.com/facebook/zstd.git src
 cd src
 cmake -B build \

@@ -9,27 +9,18 @@ env:
   NDK_VERSION: "r26d"
   NDK_URL: "https://dl.google.com/android/repository/android-ndk-r26d-linux.zip"
   ANDROID_API: "24"
-  TARGET_ABI: "arm64-v8a"
-  COMMON_CMAKE_FLAGS: >-
-    -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/android-ndk/build/cmake/android.toolchain.cmake
-    -DANDROID_ABI=arm64-v8a
-    -DANDROID_PLATFORM=android-24
-    -DCMAKE_BUILD_TYPE=Release
-    -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/libs
-    -DCMAKE_FIND_ROOT_PATH=${{ github.workspace }}/libs
-    -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-    -DBUILD_SHARED_LIBS=ON
-    -DBUILD_TESTING=OFF
 
 jobs:
-  build-libs:
+  # ═══════════════════════════════════════════════════════════════
+  # Tier 1: Core libs (no dependencies on other prebuilt libs)
+  # ═══════════════════════════════════════════════════════════════
+  tier1:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         lib:
-          # Tier 1: Core dependencies (no deps on other libs)
           - zlib
           - zstd
           - BZip2
@@ -39,156 +30,304 @@ jobs:
           - TIFF
           - sqlite
           - zip
-          # Tier 2: Text/Font rendering
-          - FreeType
-          - Harfbuzz
-          - Brotli
-          # Tier 3: Image/Color
-          - OpenColorIO
-          - OpenExr
-          - OpenImageIO
-          - WebP
-          # Tier 4: Audio
-          - OpenAL
-          - ffmpeg
-          - SndFile
-          # Tier 5: Math/Science
-          - GMP
-          - Fftw
-          - OpenBlas
-          - OpenSubdiv
-          # Tier 6: Threading/Parallel
-          - Tbb
-          - Embree
-          # Tier 7: Data/Scene
-          - OpenVDB
-          - Alembic
-          - OpenUSD
-          - OpenCOLLADA
-          - PugiXML
-          - LibXML
-          - YAML
-          - Potrace
-          # Tier 8: Python
-          - cpython
-          # Tier 9: UI/Input
-          - SDL
-          - Epoxy
-          # Tier 10: Additional
-          - Openpgl
-          - Oidn
-          - Manifold
-          - MaterialX
-          - Haru
-          - OpenJPEG
-          - Fribidi
-          - JeMalloc
-          - IMath
-          - ICUC
-          - Boost
-          # Tier 11: Shader tools
-          - ShaderC
-          # Tier 12: Blosc (needed by OpenVDB)
           - blosc
-
+          - IMath
+          - Brotli
+          - FreeType
     steps:
-      - name: Checkout libs repo
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          path: libs-repo
+          path: repo
 
-      - name: Download and extract NDK r26d
+      - name: Download NDK
         run: |
-          NDK_DIR="${{ github.workspace }}/android-ndk"
-          if [ ! -d "$NDK_DIR" ]; then
-            echo "Downloading NDK r26d..."
+          if [ ! -d "$HOME/android-ndk-r26d" ]; then
             wget -q "${{ env.NDK_URL }}" -O /tmp/ndk.zip
-            echo "Extracting NDK..."
-            unzip -q /tmp/ndk.zip -d "${{ github.workspace }}/"
-            mv "${{ github.workspace }}/android-ndk-r26d" "$NDK_DIR"
+            unzip -q /tmp/ndk.zip -d "$HOME/"
             rm /tmp/ndk.zip
           fi
-          echo "NDK ready at $NDK_DIR"
-          ls "$NDK_DIR/build/cmake/android.toolchain.cmake"
-
-      - name: Setup output directories
-        run: |
-          mkdir -p ${{ github.workspace }}/libs/lib
-          mkdir -p ${{ github.workspace }}/libs/include
-          mkdir -p ${{ github.workspace }}/build/${{ matrix.lib }}
-
-      - name: Cache NDK
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/android-ndk
-          key: ndk-r26d-linux
+          echo "ANDROID_NDK_HOME=$HOME/android-ndk-r26d" >> $GITHUB_ENV
 
       - name: Build ${{ matrix.lib }}
         run: |
-          SCRIPT="${{ github.workspace }}/libs-repo/scripts/build-${{ matrix.lib }}.sh"
-          if [ -f "$SCRIPT" ]; then
-            chmod +x "$SCRIPT"
-            bash "$SCRIPT" \
-              "${{ github.workspace }}/android-ndk" \
-              "${{ github.workspace }}/libs" \
-              "${{ github.workspace }}/build/${{ matrix.lib }}" \
-              "${{ env.ANDROID_API }}"
-          else
-            echo "ERROR: Build script not found: $SCRIPT"
-            exit 1
-          fi
+          bash repo/scripts/build-${{ matrix.lib }}.sh \
+            "$HOME/android-ndk-r26d" \
+            "$HOME/libs" \
+            "$HOME/build/${{ matrix.lib }}" \
+            "${{ env.ANDROID_API }}"
 
-      - name: Verify outputs
-        run: |
-          LIB_DIR="${{ github.workspace }}/libs"
-          echo "=== Libraries built ==="
-          find "$LIB_DIR/lib" -name "*.so" -o -name "*.a" 2>/dev/null | sort
-          echo ""
-          echo "=== Headers ==="
-          find "$LIB_DIR/include" -maxdepth 2 -type d 2>/dev/null | sort
-          echo ""
-          echo "=== Counts ==="
-          SO_COUNT=$(find "$LIB_DIR/lib" -name "*.so" 2>/dev/null | wc -l)
-          A_COUNT=$(find "$LIB_DIR/lib" -name "*.a" 2>/dev/null | wc -l)
-          echo "Shared libs (.so): $SO_COUNT"
-          echo "Static libs (.a): $A_COUNT"
-
-      - name: Upload libs artifact
+      - name: Upload libs
         uses: actions/upload-artifact@v4
         with:
-          name: libs-${{ matrix.lib }}
+          name: tier1-${{ matrix.lib }}
           path: |
-            ${{ github.workspace }}/libs/lib/
-            ${{ github.workspace }}/libs/include/
+            ~/libs/lib/
+            ~/libs/include/
           retention-days: 30
-          if-no-files-found: error
 
+  # ═══════════════════════════════════════════════════════════════
+  # Tier 2: Libs that depend only on Tier 1
+  # ═══════════════════════════════════════════════════════════════
+  tier2:
+    needs: tier1
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        lib:
+          - Tbb
+          - Harfbuzz
+          - PugiXML
+          - YAML
+          - GMP
+          - Fftw
+          - OpenJPEG
+          - WebP
+          - Haru
+          - Manifold
+          - JeMalloc
+          - OpenBlas
+          - Openpgl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Download NDK
+        run: |
+          if [ ! -d "$HOME/android-ndk-r26d" ]; then
+            wget -q "${{ env.NDK_URL }}" -O /tmp/ndk.zip
+            unzip -q /tmp/ndk.zip -d "$HOME/"
+            rm /tmp/ndk.zip
+          fi
+          echo "ANDROID_NDK_HOME=$HOME/android-ndk-r26d" >> $GITHUB_ENV
+
+      - name: Download Tier 1 libs
+        uses: actions/download-artifact@v4
+        with:
+          path: all-tier1
+          pattern: tier1-*
+          merge-multiple: true
+
+      - name: Merge Tier 1 libs
+        run: |
+          mkdir -p ~/libs/lib ~/libs/include
+          cp -rn all-tier1/lib/* ~/libs/lib/ 2>/dev/null || true
+          cp -rn all-tier1/include/* ~/libs/include/ 2>/dev/null || true
+          echo "Tier 1 libs:"
+          find ~/libs/lib -name "*.so" -o -name "*.a" | wc -l
+
+      - name: Build ${{ matrix.lib }}
+        run: |
+          export CMAKE_PREFIX_PATH="$HOME/libs"
+          export PKG_CONFIG_PATH="$HOME/libs/lib/pkgconfig:$HOME/libs/lib64/pkgconfig"
+          bash repo/scripts/build-${{ matrix.lib }}.sh \
+            "$HOME/android-ndk-r26d" \
+            "$HOME/libs" \
+            "$HOME/build/${{ matrix.lib }}" \
+            "${{ env.ANDROID_API }}"
+
+      - name: Upload libs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier2-${{ matrix.lib }}
+          path: |
+            ~/libs/lib/
+            ~/libs/include/
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════
+  # Tier 3: Libs that depend on Tier 1 + Tier 2
+  # ═══════════════════════════════════════════════════════════════
+  tier3:
+    needs: [tier1, tier2]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        lib:
+          - OpenEXR
+          - OpenVDB
+          - Embree
+          - Oidn
+          - OpenColorIO
+          - OpenImageIO
+          - OpenSubdiv
+          - Epoxy
+          - OpenAL
+          - ffmpeg
+          - SndFile
+          - SDL
+          - Potrace
+          - LibXML
+          - OpenCOLLADA
+          - Alembic
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Download NDK
+        run: |
+          if [ ! -d "$HOME/android-ndk-r26d" ]; then
+            wget -q "${{ env.NDK_URL }}" -O /tmp/ndk.zip
+            unzip -q /tmp/ndk.zip -d "$HOME/"
+            rm /tmp/ndk.zip
+          fi
+          echo "ANDROID_NDK_HOME=$HOME/android-ndk-r26d" >> $GITHUB_ENV
+
+      - name: Download all previous tier libs
+        uses: actions/download-artifact@v4
+        with:
+          path: all-prev-libs
+          pattern: tier*-*
+          merge-multiple: true
+
+      - name: Merge all previous tier libs
+        run: |
+          mkdir -p ~/libs/lib ~/libs/include
+          cp -rn all-prev-libs/lib/* ~/libs/lib/ 2>/dev/null || true
+          cp -rn all-prev-libs/include/* ~/libs/include/ 2>/dev/null || true
+          echo "All libs so far:"
+          find ~/libs/lib -name "*.so" -o -name "*.a" | wc -l
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libpcre2-dev
+
+      - name: Build ${{ matrix.lib }}
+        run: |
+          export CMAKE_PREFIX_PATH="$HOME/libs"
+          export PKG_CONFIG_PATH="$HOME/libs/lib/pkgconfig:$HOME/libs/lib64/pkgconfig"
+          bash repo/scripts/build-${{ matrix.lib }}.sh \
+            "$HOME/android-ndk-r26d" \
+            "$HOME/libs" \
+            "$HOME/build/${{ matrix.lib }}" \
+            "${{ env.ANDROID_API }}"
+
+      - name: Upload libs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier3-${{ matrix.lib }}
+          path: |
+            ~/libs/lib/
+            ~/libs/include/
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════
+  # Tier 4: Complex libs (Boost, cpython, OpenUSD, MaterialX, ShaderC, Fribidi, ICUC)
+  # ═══════════════════════════════════════════════════════════════
+  tier4:
+    needs: [tier1, tier2, tier3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        lib:
+          - Boost
+          - cpython
+          - OpenUSD
+          - MaterialX
+          - ShaderC
+          - Fribidi
+          - ICUC
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Download NDK
+        run: |
+          if [ ! -d "$HOME/android-ndk-r26d" ]; then
+            wget -q "${{ env.NDK_URL }}" -O /tmp/ndk.zip
+            unzip -q /tmp/ndk.zip -d "$HOME/"
+            rm /tmp/ndk.zip
+          fi
+          echo "ANDROID_NDK_HOME=$HOME/android-ndk-r26d" >> $GITHUB_ENV
+
+      - name: Download all previous tier libs
+        uses: actions/download-artifact@v4
+        with:
+          path: all-prev-libs
+          pattern: tier*-*
+          merge-multiple: true
+
+      - name: Merge all previous tier libs
+        run: |
+          mkdir -p ~/libs/lib ~/libs/include
+          cp -rn all-prev-libs/lib/* ~/libs/lib/ 2>/dev/null || true
+          cp -rn all-prev-libs/include/* ~/libs/include/ 2>/dev/null || true
+          echo "All libs so far:"
+          find ~/libs/lib -name "*.so" -o -name "*.a" | wc -l
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq meson ninja-build python3-pip
+
+      - name: Build ${{ matrix.lib }}
+        run: |
+          export CMAKE_PREFIX_PATH="$HOME/libs"
+          export PKG_CONFIG_PATH="$HOME/libs/lib/pkgconfig:$HOME/libs/lib64/pkgconfig"
+          bash repo/scripts/build-${{ matrix.lib }}.sh \
+            "$HOME/android-ndk-r26d" \
+            "$HOME/libs" \
+            "$HOME/build/${{ matrix.lib }}" \
+            "${{ env.ANDROID_API }}"
+
+      - name: Upload libs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier4-${{ matrix.lib }}
+          path: |
+            ~/libs/lib/
+            ~/libs/include/
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════
+  # Collect: merge all tiers into final artifact
+  # ═══════════════════════════════════════════════════════════════
   collect:
-    needs: build-libs
+    needs: [tier1, tier2, tier3, tier4]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: all-libs
-          pattern: libs-*
+          pattern: tier*-*
           merge-multiple: true
 
       - name: Merge and package
         run: |
-          mkdir -p merged-libs/lib merged-libs/include
-          cp -rn all-libs/lib/* merged-libs/lib/ 2>/dev/null || true
-          cp -rn all-libs/include/* merged-libs/include/ 2>/dev/null || true
+          mkdir -p final-libs/lib final-libs/include
+          cp -rn all-libs/lib/* final-libs/lib/ 2>/dev/null || true
+          cp -rn all-libs/include/* final-libs/include/ 2>/dev/null || true
 
           echo "=== Final library count ==="
-          SO=$(find merged-libs/lib -name "*.so" | wc -l)
-          A=$(find merged-libs/lib -name "*.a" | wc -l)
+          SO=$(find final-libs/lib -name "*.so" | wc -l)
+          A=$(find final-libs/lib -name "*.a" | wc -l)
           echo "Shared: $SO, Static: $A"
 
           echo "=== Final header dirs ==="
-          ls merged-libs/include/
+          ls final-libs/include/
 
-          cd merged-libs
+          echo "=== Size per lib ==="
+          for dir in final-libs/lib/*/; do
+            libname=$(basename "$dir")
+            size=$(du -sh "$dir" | cut -f1)
+            echo "  $libname: $size"
+          done
+
+          cd final-libs
           tar czf ${{ github.workspace }}/libs-blender-4.5-arm64.tar.gz lib/ include/
 
       - name: Upload final artifact
