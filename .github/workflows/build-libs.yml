@@ -1,0 +1,199 @@
+name: Build Third-Party Libraries for Blender 4.5 Android ARM64
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  NDK_VERSION: "r26d"
+  NDK_URL: "https://dl.google.com/android/repository/android-ndk-r26d-linux.zip"
+  ANDROID_API: "24"
+  TARGET_ABI: "arm64-v8a"
+  COMMON_CMAKE_FLAGS: >-
+    -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/android-ndk/build/cmake/android.toolchain.cmake
+    -DANDROID_ABI=arm64-v8a
+    -DANDROID_PLATFORM=android-24
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/libs
+    -DCMAKE_FIND_ROOT_PATH=${{ github.workspace }}/libs
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    -DBUILD_SHARED_LIBS=ON
+    -DBUILD_TESTING=OFF
+
+jobs:
+  build-libs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        lib:
+          # Tier 1: Core dependencies (no deps on other libs)
+          - zlib
+          - zstd
+          - BZip2
+          - Expat
+          - JPEG
+          - Png
+          - TIFF
+          - sqlite
+          - zip
+          # Tier 2: Text/Font rendering
+          - FreeType
+          - Harfbuzz
+          - Brotli
+          # Tier 3: Image/Color
+          - OpenColorIO
+          - OpenExr
+          - OpenImageIO
+          - WebP
+          # Tier 4: Audio
+          - OpenAL
+          - ffmpeg
+          - SndFile
+          # Tier 5: Math/Science
+          - GMP
+          - Fftw
+          - OpenBlas
+          - OpenSubdiv
+          # Tier 6: Threading/Parallel
+          - Tbb
+          - Embree
+          # Tier 7: Data/Scene
+          - OpenVDB
+          - Alembic
+          - OpenUSD
+          - OpenCOLLADA
+          - PugiXML
+          - LibXML
+          - YAML
+          - Potrace
+          # Tier 8: Python
+          - cpython
+          # Tier 9: UI/Input
+          - SDL
+          - Epoxy
+          # Tier 10: Additional
+          - Openpgl
+          - Oidn
+          - Manifold
+          - MaterialX
+          - Haru
+          - OpenJPEG
+          - Fribidi
+          - JeMalloc
+          - IMath
+          - ICUC
+          - Boost
+          # Tier 11: Shader tools
+          - ShaderC
+          # Tier 12: Blosc (needed by OpenVDB)
+          - blosc
+
+    steps:
+      - name: Checkout libs repo
+        uses: actions/checkout@v4
+        with:
+          path: libs-repo
+
+      - name: Download and extract NDK r26d
+        run: |
+          NDK_DIR="${{ github.workspace }}/android-ndk"
+          if [ ! -d "$NDK_DIR" ]; then
+            echo "Downloading NDK r26d..."
+            wget -q "${{ env.NDK_URL }}" -O /tmp/ndk.zip
+            echo "Extracting NDK..."
+            unzip -q /tmp/ndk.zip -d "${{ github.workspace }}/"
+            mv "${{ github.workspace }}/android-ndk-r26d" "$NDK_DIR"
+            rm /tmp/ndk.zip
+          fi
+          echo "NDK ready at $NDK_DIR"
+          ls "$NDK_DIR/build/cmake/android.toolchain.cmake"
+
+      - name: Setup output directories
+        run: |
+          mkdir -p ${{ github.workspace }}/libs/lib
+          mkdir -p ${{ github.workspace }}/libs/include
+          mkdir -p ${{ github.workspace }}/build/${{ matrix.lib }}
+
+      - name: Cache NDK
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/android-ndk
+          key: ndk-r26d-linux
+
+      - name: Build ${{ matrix.lib }}
+        run: |
+          SCRIPT="${{ github.workspace }}/libs-repo/scripts/build-${{ matrix.lib }}.sh"
+          if [ -f "$SCRIPT" ]; then
+            chmod +x "$SCRIPT"
+            bash "$SCRIPT" \
+              "${{ github.workspace }}/android-ndk" \
+              "${{ github.workspace }}/libs" \
+              "${{ github.workspace }}/build/${{ matrix.lib }}" \
+              "${{ env.ANDROID_API }}"
+          else
+            echo "ERROR: Build script not found: $SCRIPT"
+            exit 1
+          fi
+
+      - name: Verify outputs
+        run: |
+          LIB_DIR="${{ github.workspace }}/libs"
+          echo "=== Libraries built ==="
+          find "$LIB_DIR/lib" -name "*.so" -o -name "*.a" 2>/dev/null | sort
+          echo ""
+          echo "=== Headers ==="
+          find "$LIB_DIR/include" -maxdepth 2 -type d 2>/dev/null | sort
+          echo ""
+          echo "=== Counts ==="
+          SO_COUNT=$(find "$LIB_DIR/lib" -name "*.so" 2>/dev/null | wc -l)
+          A_COUNT=$(find "$LIB_DIR/lib" -name "*.a" 2>/dev/null | wc -l)
+          echo "Shared libs (.so): $SO_COUNT"
+          echo "Static libs (.a): $A_COUNT"
+
+      - name: Upload libs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libs-${{ matrix.lib }}
+          path: |
+            ${{ github.workspace }}/libs/lib/
+            ${{ github.workspace }}/libs/include/
+          retention-days: 30
+          if-no-files-found: error
+
+  collect:
+    needs: build-libs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-libs
+          pattern: libs-*
+          merge-multiple: true
+
+      - name: Merge and package
+        run: |
+          mkdir -p merged-libs/lib merged-libs/include
+          cp -rn all-libs/lib/* merged-libs/lib/ 2>/dev/null || true
+          cp -rn all-libs/include/* merged-libs/include/ 2>/dev/null || true
+
+          echo "=== Final library count ==="
+          SO=$(find merged-libs/lib -name "*.so" | wc -l)
+          A=$(find merged-libs/lib -name "*.a" | wc -l)
+          echo "Shared: $SO, Static: $A"
+
+          echo "=== Final header dirs ==="
+          ls merged-libs/include/
+
+          cd merged-libs
+          tar czf ${{ github.workspace }}/libs-blender-4.5-arm64.tar.gz lib/ include/
+
+      - name: Upload final artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libs-blender-4.5-arm64
+          path: ${{ github.workspace }}/libs-blender-4.5-arm64.tar.gz
+          retention-days: 30
