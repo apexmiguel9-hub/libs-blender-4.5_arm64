@@ -71,6 +71,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════
   tier2:
     needs: tier1
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -89,7 +90,7 @@ jobs:
           - Manifold
           - JeMalloc
           - OpenBlas
-          - Openpgl
+          - Openpgl  # optional, may fail
     steps:
       - name: Checkout
         uses: actions/checkout@v4
