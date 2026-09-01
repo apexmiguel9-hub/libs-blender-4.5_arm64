@@ -16,6 +16,7 @@ cmake -B build \
   -DCMAKE_FIND_ROOT_PATH="$OUTPUT_DIR" \
   -DBUILD_SHARED_LIBS=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
   -DNO_OPENGL=TRUE \
+  -DCMAKE_SKIP_INSTALL_RULES=TRUE \
   -DOSD_BUILD_TESTS=OFF -DOSD_BUILD_EXAMPLES=OFF \
   -DOSD_BUILD_PYREGRESSION=OFF -DOSD_BUILD_PYTHON=OFF \
   -DOSD_CUDA_SUPPORT=OFF -DOSD_OPENCL_SUPPORT=OFF \
@@ -30,5 +31,22 @@ cmake -B build \
   -DCMAKE_DISABLE_FIND_PACKAGE_Doxygen=TRUE \
   -DCMAKE_DISABLE_FIND_PACKAGE_Docutils=TRUE
 cmake --build build -j$(nproc)
-cmake --install build
-echo "OpenSubdiv built"
+
+# Manual install since we skipped install rules
+mkdir -p "$OUTPUT_DIR/lib" "$OUTPUT_DIR/include/opensubdiv"
+
+# Copy static/shared libs
+find build -name "*.a" -o -name "*.so" | while read f; do
+  cp -v "$f" "$OUTPUT_DIR/lib/" 2>/dev/null || true
+done
+
+# Copy headers
+cp -r src/opensubdiv/osd "$OUTPUT_DIR/include/opensubdiv/" 2>/dev/null || true
+cp -r src/opensubdiv/hbr "$OUTPUT_DIR/include/opensubdiv/" 2>/dev/null || true
+cp -r src/opensubdiv/vtr "$OUTPUT_DIR/include/opensubdiv/" 2>/dev/null || true
+cp -r src/opensubdiv/sdc "$OUTPUT_DIR/include/opensubdiv/" 2>/dev/null || true
+cp -r src/opensubdiv/far "$OUTPUT_DIR/include/opensubdiv/" 2>/dev/null || true
+cp -r src/opensubdiv/bfr "$OUTPUT_DIR/include/opensubdiv/" 2>/dev/null || true
+find src/opensubdiv -maxdepth 1 -name "*.h" -exec cp {} "$OUTPUT_DIR/include/opensubdiv/" \; 2>/dev/null || true
+
+echo "OpenSubdiv built and installed to $OUTPUT_DIR"

@@ -272,7 +272,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq meson ninja-build python3-pip
+          sudo apt-get install -y -qq meson ninja-build python3-pip autoconf autoheader libtool
 
       - name: Build ${{ matrix.lib }}
         run: |

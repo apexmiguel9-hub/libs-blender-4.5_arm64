@@ -10,126 +10,105 @@ mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
 
 # ── 1. Download ──────────────────────────────────────────────
 if [ ! -d "src" ]; then
+  echo "=== Downloading Python ${PYTHON_VER} ==="
   wget -q "https://www.python.org/ftp/python/${PYTHON_VER}/Python-${PYTHON_VER}.tar.xz"
   tar xf "Python-${PYTHON_VER}.tar.xz"
   mv "Python-${PYTHON_VER}" src
 fi
-cd src
 
-# ── 2. Build HOST python + pgen first ───────────────────────
-if [ ! -f "../host_python/Parser/pgen" ]; then
-  mkdir -p ../host_build && cd ../host_build
-  "$PWD/../src/configure" --prefix="$PWD/../host_python" \
-    --without-ensurepip --disable-shared --quiet
-  make -j$(nproc) Parser/pgen 2>/dev/null || make -j$(nproc) Parser/pgen
-  mkdir -p ../host_python/Parser
-  cp Parser/pgen ../host_python/Parser/
-  cd ../src
-  echo "Host pgen built"
+# ── 2. Build HOST python (for pgen + build tools) ──────────
+if [ ! -f host_python/bin/python3 ]; then
+  echo "=== Building host Python ==="
+  mkdir -p host_build && cd host_build
+  ../src/configure --prefix="$PWD/../host_python" \
+    --without-ensurepip --quiet 2>&1 | tail -5
+  make -j$(nproc) 2>&1 | tail -10
+  make install 2>&1 | tail -5
+  cd "$BUILD_DIR"
+  echo "Host Python installed"
+  ls host_python/bin/python3
 fi
 
+HOST_PYTHON="$PWD/host_python/bin/python3"
+
 # ── 3. Cross-compile for Android ARM64 ──────────────────────
-# Set cross-compile environment
+echo "=== Cross-compiling for Android ARM64 ==="
+cd src
+
 TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
+HOST_TAG="aarch64-linux-android"
+BUILD_TAG="$(uname -m)-linux-gnu"
+
 export CC="$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang"
 export CXX="$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang++"
 export AR="$TOOLCHAIN/bin/llvm-ar"
 export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
-export READELF="$TOOLCHAIN/bin/llvm-readelf"
 export CFLAGS="-fPIC -O2 -DANDROID -D__ANDROID_API__=${API_LEVEL}"
-export LDFLAGS="-static-libstdc++"
+export LDFLAGS=""
 
-# Machine triplet for cross-compilation
-HOST_TAG="aarch64-linux-android"
-BUILD_TAG="$(uname -m)-linux-gnu"
-
-# Create a minimal pyconfig.h manually if configure fails
-cat > android_config.c << 'ENDCONFIG'
-/* Minimal pyconfig for Android ARM64 cross-compile */
-#include <stdint.h>
-typedef int64_t Py_ssize_t;
-#define SIZEOF_LONG 8
-#define SIZEOF_SIZE_T 8
-#define SIZEOF_VOID_P 8
-#define SIZEOF_INT 4
-#define SIZEOF_UNSIGNED_INT 4
-#define SIZEOF_SHORT 2
-#define SIZEOF_UNSIGNED_SHORT 2
-#define SIZEOF_CHAR 1
-#define SIZEOF_UNSIGNED_CHAR 1
-#define SIZEOF_FLOAT 4
-#define SIZEOF_DOUBLE 8
-#define SIZEOF_TIME_T 8
-#define SIZEOF_PID_T 4
-ENDCONFIG
-
-# Patch configure to accept --host for cross-compilation
-if ! grep -q "android" config.site 2>/dev/null; then
-  cat > config.site << 'ENDSITE'
+# Create config.site for cross-compilation
+cat > config.site << 'ENDSITE'
 ac_cv_file__dev_ptmx=yes
 ac_cv_file__dev_ptc=no
 ac_cv_have_long_long_format=yes
 ac_cv_working_tzset=yes
+ac_cv_little_endian_double=yes
 ENDSITE
-fi
-
-# Disable problematic modules for Android
-DISABLE_MODULES="_ssl _hashlib _ssl _ctypes _tkinter _curses _curses_panel \
-  _dbm _gdbm _readline _lzma _bz2 _uuid _decimal _contextvars \
-  _multiprocessing _posixshmem _posixsubprocess pyexpat"
 
 # Configure for cross-compilation
 if [ ! -f Makefile ]; then
-  CONFIGURE_ARGS="\
+  ./configure \
     --host=$HOST_TAG \
     --build=$BUILD_TAG \
-    --prefix=$OUTPUT_DIR \
+    --prefix="$OUTPUT_DIR" \
     --enable-shared \
-    --with-build-python=../host_python/python \
+    --with-build-python="$HOST_PYTHON" \
     --without-ensurepip \
     --disable-ipv6 \
-    --with-openssl='' \
     --with-system-ffi=no \
     --with-system-expat=no \
     --with-system-libmpdec=no \
-    --without-threads \
+    --disable-ssl \
+    --disable-hashlib \
+    --disable-bz2 \
+    --disable-lzma \
+    --disable-readline \
+    --disable-curses \
+    --disable-db4-db5 \
+    --disable-gdbm \
+    --disable-uuid \
+    --disable-decimal \
+    --disable-ctypes \
+    --disable-tk \
+    --disable-xmlparse \
+    --disable-pyexpat \
+    --disable-multiprocessing \
     ac_cv_buggy_getaddrinfo=no \
-    ac_cv_file__dev_ptmx=yes \
-    ac_cv_file__dev_ptc=no \
-    ac_cv_have_long_long_format=yes"
-
-  for mod in $DISABLE_MODULES; do
-    CONFIGURE_ARGS="$CONFIGURE_ARGS --disable-$mod"
-  done
-
-  ./configure $CONFIGURE_ARGS || {
-    echo "configure failed, using manual build"
-  }
+    2>&1 | tail -20
 fi
 
-# Build python executable for host (needed for freezing modules)
-# and static library for target
-if [ -f Makefile ]; then
-  # Build just the library and modules
-  make -j$(nproc) all 2>&1 | tail -20 || {
-    echo "Full build failed, trying minimal static lib only..."
-    make -j$(nproc) libpython${PYTHON_SHORT}.a 2>&1 | tail -20 || true
-  }
-fi
+# Build just the static library
+echo "=== Building libpython${PYTHON_SHORT}.a ==="
+make -j$(nproc) libpython${PYTHON_SHORT}.a 2>&1 | tail -20
 
 # ── 4. Install headers + static lib ────────────────────────
+echo "=== Installing ==="
 mkdir -p "$OUTPUT_DIR/include/python${PYTHON_SHORT}"
 mkdir -p "$OUTPUT_DIR/lib"
 
-# Copy headers
-if [ -d "Include" ]; then
-  cp -r Include/*.h "$OUTPUT_DIR/include/python${PYTHON_SHORT}/"
-fi
-if [ -f "pyconfig.h" ]; then
-  cp pyconfig.h "$OUTPUT_DIR/include/python${PYTHON_SHORT}/"
-fi
-# Generated config header
-find . -name "pyconfig.h" -maxdepth 2 -exec cp {} "$OUTPUT_DIR/include/python${PYTHON_SHORT}/" \; 2>/dev/null || true
+# Copy generated pyconfig.h
+find . -name "pyconfig.h" -maxdepth 1 -exec cp {} "$OUTPUT_DIR/include/python${PYTHON_SHORT}/" \;
+
+# Copy standard headers
+cp -r Include/*.h "$OUTPUT_DIR/include/python${PYTHON_SHORT}/" 2>/dev/null || true
+
+# Copy internal headers
+for dir in Include/internal Include/cpython Include/internal/cpython; do
+  if [ -d "$dir" ]; then
+    mkdir -p "$OUTPUT_DIR/include/python${PYTHON_SHORT}/$(basename $dir)"
+    cp -r "$dir"/* "$OUTPUT_DIR/include/python${PYTHON_SHORT}/$(basename $dir)/" 2>/dev/null || true
+  fi
+done
 
 # Copy static library
 FOUND_LIB=0
@@ -147,18 +126,23 @@ for lib in \
 done
 
 if [ "$FOUND_LIB" -eq 0 ]; then
-  # Last resort: find any .a with python in the name
   PYTHON_A=$(find . -name "libpython*.a" -type f | head -1)
   if [ -n "$PYTHON_A" ]; then
     cp "$PYTHON_A" "$OUTPUT_DIR/lib/libpython${PYTHON_SHORT}.a"
     FOUND_LIB=1
-    echo "Installed: $PYTHON_A -> libpython${PYTHON_SHORT}.a"
+    echo "Installed: $PYTHON_A"
   fi
 fi
 
 if [ "$FOUND_LIB" -eq 0 ]; then
-  echo "WARNING: No static Python library found"
-  ls -la *.a 2>/dev/null || echo "No .a files at all"
+  echo "ERROR: No static Python library found!"
+  ls -la *.a 2>/dev/null || echo "No .a files"
+  exit 1
 fi
 
-echo "CPython ${PYTHON_VER} cross-compile for Android ARM64 done"
+echo "=== CPython ${PYTHON_VER} for Android ARM64 DONE ==="
+echo "  lib: $OUTPUT_DIR/lib/libpython${PYTHON_SHORT}.a"
+ls -lh "$OUTPUT_DIR/lib/libpython${PYTHON_SHORT}.a"
+echo "  headers: $OUTPUT_DIR/include/python${PYTHON_SHORT}/"
+ls "$OUTPUT_DIR/include/python${PYTHON_SHORT}/" | wc -l
+echo "  header files"
