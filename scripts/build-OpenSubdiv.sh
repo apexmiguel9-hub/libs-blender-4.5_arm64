@@ -5,93 +5,56 @@ mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
 git clone --depth 1 --branch v3_6_0 https://github.com/PixarAnimationStudios/OpenSubdiv.git src
 cd src
 
-rm -rf glLoader
+# Direct NDK compilation — bypass cmake entirely
+TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
+CC="$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang"
+CXX="$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang++"
+AR="$TOOLCHAIN/bin/llvm-ar"
 
-# Nuclear patch: remove ALL install/export rules, all GPU targets, all example/tutorial targets
-python3 << 'PATCH'
-import os, re
+INC="-I. -Iopensubdiv -Iopensubdiv/osd -Iopensubdiv/far -Iopensubdiv/vtr -Iopensubdiv/sdc -Iopensubdiv/hbr -Iopensubdiv/bfr -IglLoader"
+CFLAGS="-O2 -fPIC -DANDROID -D__ANDROID_API__=$API_LEVEL -DOPENSUBDIV_VERSION_STRING=\"3.6.0\" $INC"
+CXXFLAGS="$CFLAGS -std=c++17"
 
-for root, dirs, files in os.walk('.'):
-    for fname in files:
-        if fname == 'CMakeLists.txt':
-            fpath = os.path.join(root, fname)
-            txt = open(fpath).read()
-            original = txt
-            
-            # Remove ALL install() blocks (handles nested parens)
-            result = []
-            i = 0
-            while i < len(txt):
-                if txt[i:i+8].lower() == 'install(' or txt[i:i+9].lower() == 'install (':
-                    # Find matching closing paren
-                    depth = 0
-                    j = i
-                    while j < len(txt):
-                        if txt[j] == '(':
-                            depth += 1
-                        elif txt[j] == ')':
-                            depth -= 1
-                            if depth == 0:
-                                result.append('# install removed for Android')
-                                i = j + 1
-                                break
-                        j += 1
-                    else:
-                        result.append(txt[i])
-                        i += 1
-                else:
-                    result.append(txt[i])
-                    i += 1
-            txt = ''.join(result)
-            
-            # Remove install(EXPORT ...) blocks specifically
-            txt = re.sub(r'install\s*\(\s*EXPORT[^)]*\)', '# export install removed', txt, flags=re.DOTALL)
-            
-            # Remove osd_gpu_obj references
-            txt = txt.replace('${OPENGL_LOADER_OBJS}', '')
-            txt = re.sub(r'\$<TARGET_OBJECTS:osd_gpu_obj>', '', txt)
-            
-            # Remove regression_common_obj references
-            txt = re.sub(r'\$<TARGET_OBJECTS:regression_common_obj>', '', txt)
-            
-            if txt != original:
-                open(fpath, 'w').write(txt)
-                print(f'Patched: {fpath}')
+rm -rf "$BUILD_DIR/obj"
+mkdir -p "$BUILD_DIR/obj"
 
-print('All patches applied')
-PATCH
+compile_sources() {
+    local dir="$1"
+    local count=0
+    while IFS= read -r f; do
+        local obj="$BUILD_DIR/obj/$(echo $f | tr '/' '_').o"
+        if $CXX $CXXFLAGS -c "$f" -o "$obj" 2>/dev/null; then
+            count=$((count + 1))
+        fi
+    done < <(find "$dir" -name "*.cpp" \
+        ! -name "*cl.cpp" ! -name "*cuda*" ! -name "*metal*" \
+        ! -name "*vulkan*" ! -name "*dx*" ! -name "*d3d*" \
+        ! -name "*cudaRuntime*" ! -name "*cudacommon*" \
+        2>/dev/null)
+    echo "  Compiled $count files from $dir"
+}
 
-cmake -B build \
-  -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
-  -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM="android-$API_LEVEL" \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$OUTPUT_DIR" \
-  -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-  -DCMAKE_SKIP_INSTALL_RULES=TRUE \
-  -DNO_EXAMPLES=ON -DNO_TUTORIALS=ON -DNO_DOC=ON \
-  -DOSD_BUILD_TESTS=OFF -DOSD_BUILD_EXAMPLES=OFF \
-  -DOSD_BUILD_PYREGRESSION=OFF -DOSD_BUILD_PYTHON=OFF \
-  -DOSD_CUDA_SUPPORT=OFF -DOSD_OPENCL_SUPPORT=OFF \
-  -DOSD_METAL_SUPPORT=OFF -DOSD_VULKAN_SUPPORT=OFF \
-  -DOSD_CLEW_SUPPORT=OFF \
-  -DBUILD_SHARED_LIBS=OFF \
-  -DCMAKE_DISABLE_FIND_PACKAGE_OpenGL=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_GLEW=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_CLEW=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_OpenCL=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_CUDA=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_PTex=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_Doxygen=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_Docutils=TRUE
+echo "=== Compiling OpenSubdiv 3.6.0 CPU sources ==="
+compile_sources "opensubdiv/osd"
+compile_sources "opensubdiv/far"
+compile_sources "opensubdiv/vtr"
+compile_sources "opensubdiv/sdc"
+compile_sources "opensubdiv/bfr"
 
-cmake --build build -j$(nproc) --target osd_static_cpu
+# version
+$CXX $CXXFLAGS -c opensubdiv/version.cpp -o "$BUILD_DIR/obj/version.o" 2>/dev/null || true
 
+echo "=== Creating libosdCPU.a ==="
 mkdir -p "$OUTPUT_DIR/lib" "$OUTPUT_DIR/include/opensubdiv"
-find build -name "*.a" -exec cp {} "$OUTPUT_DIR/lib/" \;
+$AR rcs "$OUTPUT_DIR/lib/libosdCPU.a" "$BUILD_DIR/obj/"*.o
 
+echo "=== Copying headers ==="
 for dir in osd far hbr sdc vtr bfr; do
   [ -d "opensubdiv/$dir" ] && cp -r "opensubdiv/$dir" "$OUTPUT_DIR/include/opensubdiv/" 2>/dev/null || true
 done
 find opensubdiv -maxdepth 1 -name "*.h" -exec cp {} "$OUTPUT_DIR/include/opensubdiv/" \; 2>/dev/null || true
 
-echo "OpenSubdiv built"
-ls -lh "$OUTPUT_DIR/lib/"*.a 2>/dev/null
+echo "=== Done ==="
+ls -lh "$OUTPUT_DIR/lib/libosdCPU.a"
+echo "Objects: $(ls "$BUILD_DIR/obj/"*.o 2>/dev/null | wc -l)"
+echo "Headers: $(find "$OUTPUT_DIR/include/opensubdiv" -name "*.h" | wc -l)"
