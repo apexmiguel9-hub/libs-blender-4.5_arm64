@@ -2,7 +2,7 @@
 set -euo pipefail
 NDK_DIR="$1"; OUTPUT_DIR="$2"; BUILD_DIR="$3"; API_LEVEL="${4:-24}"
 mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
-git clone --depth 1 --branch icu-75_1 https://github.com/unicode-org/icu.git src
+git clone --depth 1 --branch release-75-1 https://github.com/unicode-org/icu.git src
 cd src
 cmake -B build \
   -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \

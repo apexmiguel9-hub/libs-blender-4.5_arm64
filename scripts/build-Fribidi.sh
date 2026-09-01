@@ -2,7 +2,7 @@
 set -euo pipefail
 NDK_DIR="$1"; OUTPUT_DIR="$2"; BUILD_DIR="$3"; API_LEVEL="${4:-24}"
 mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
-git clone --depth 1 --branch 1.0.14 https://github.com/fribidi/fribidi.git src
+git clone --depth 1 https://github.com/fribidi/fribidi.git src
 cd src
 TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
 TARGET=aarch64-linux-android

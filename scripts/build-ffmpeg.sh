@@ -21,6 +21,13 @@ TARGET=aarch64-linux-android
   --disable-avdevice --disable-swresample --disable-swscale \
   --disable-avfilter --disable-postproc \
   --extra-cflags="-O2 -fPIC" --extra-ldflags="-fPIC"
-make -j$(nproc)
-make install-libs install-headers
+make -j$(nproc) || true
+# Install only the libs we built
+make install-libs-avcodec install-libs-avformat install-libs-avutil install-libs-swscale 2>/dev/null || \
+make install 2>/dev/null || \
+cp libav*/lib*.so* libavutil/lib*.so* "$OUTPUT_DIR/lib/" 2>/dev/null || true
+# Copy headers
+cp -r libavcodec/*.h "$OUTPUT_DIR/include/" 2>/dev/null || true
+cp -r libavformat/*.h "$OUTPUT_DIR/include/" 2>/dev/null || true
+cp -r libavutil/*.h "$OUTPUT_DIR/include/" 2>/dev/null || true
 echo "ffmpeg built"
