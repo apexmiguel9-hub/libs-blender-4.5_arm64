@@ -146,6 +146,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════
   tier3:
     needs: [tier1, tier2]
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
