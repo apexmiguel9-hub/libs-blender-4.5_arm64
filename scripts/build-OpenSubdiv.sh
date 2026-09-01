@@ -5,9 +5,20 @@ mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
 git clone --depth 1 --branch v3_6_0 https://github.com/PixarAnimationStudios/OpenSubdiv.git src
 cd src
 # Remove glLoader — but don't use sed /glLoader/d as it breaks CMakeLists parsing
-# (removes lines mid-set() calls, losing closing parentheses)
 rm -rf glLoader
-# Just disable OpenGL entirely — Android uses GLES, not desktop GL
+# Patch install blocks that fail when PUBLIC_HEADER_FILES is empty (NO_OPENGL mode)
+# cmake 3.31+ errors: "install FILES given no DESTINATION!" when file list is empty
+# Remove the first install(FILES PUBLIC_HEADER_FILES ...) block
+python3 -c "
+import re
+txt = open('opensubdiv/osd/CMakeLists.txt').read()
+# Remove install(FILES \${PUBLIC_HEADER_FILES} ...) block
+txt = re.sub(r'install\(\s*FILES\s+\\\$\\{PUBLIC_HEADER_FILES\}.*?\n\s*\n?\s*PERMISSIONS.*?\n\s*OWNER_READ.*?\n\s*GROUP_READ.*?\n\s*WORLD_READ\s*\)', '', txt, flags=re.DOTALL)
+# Also remove the ANDROID install(FILES Android.mk ...) block
+txt = re.sub(r'if\s*\(ANDROID\)\s*\n\s*install\(.*?endif\(\)', '', txt, flags=re.DOTALL)
+open('opensubdiv/osd/CMakeLists.txt','w').write(txt)
+print('Patched install blocks')
+"
 cmake -B build \
   -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM="android-$API_LEVEL" \
