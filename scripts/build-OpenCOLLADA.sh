@@ -7,6 +7,7 @@ mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
 git clone --depth 1 https://github.com/PCRE2Project/pcre2.git /tmp/pcre2
 cd /tmp/pcre2
 cmake -B build \
+  -DCMAKE_PREFIX_PATH="$OUTPUT_DIR" \
   -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM="android-$API_LEVEL" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$OUTPUT_DIR" \
@@ -19,6 +20,7 @@ cd "$BUILD_DIR"
 git clone --depth 1 https://github.com/KhronosGroup/OpenCOLLADA.git src
 cd src
 cmake -B build \
+  -DCMAKE_PREFIX_PATH="$OUTPUT_DIR" \
   -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM="android-$API_LEVEL" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$OUTPUT_DIR" \

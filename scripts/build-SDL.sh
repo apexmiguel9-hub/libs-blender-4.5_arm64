@@ -6,6 +6,8 @@ mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
 git clone --depth 1 --branch release-2.30.10 https://github.com/libsdl-org/SDL.git src
 cd src
 cmake -B build \
+  -DCMAKE_FIND_ROOT_PATH="$OUTPUT_DIR" \
+  -DCMAKE_PREFIX_PATH="$OUTPUT_DIR" \
   -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM="android-$API_LEVEL" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$OUTPUT_DIR" \
