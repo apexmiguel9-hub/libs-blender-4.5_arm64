@@ -2,7 +2,7 @@
 set -euo pipefail
 NDK_DIR="$1"; OUTPUT_DIR="$2"; BUILD_DIR="$3"; API_LEVEL="${4:-24}"
 mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
-git clone --depth 1 --branch icu-75_1 https://github.com/unicode-org/icu.git src
+git clone --depth 1 --branch v24.11 https://github.com/PixarAnimationStudios/OpenUSD.git src
 cd src
 cmake -B build \
   -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
@@ -11,7 +11,11 @@ cmake -B build \
   -DCMAKE_PREFIX_PATH="$OUTPUT_DIR" \
   -DCMAKE_FIND_ROOT_PATH="$OUTPUT_DIR" \
   -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-  -DICU_BUILD_DATA=OFF -DICU_TOOLS=OFF -DICU_EXTRAS=OFF
+  -DPXR_BUILD_TESTS=OFF -DPXR_BUILD_EXAMPLES=OFF -DPXR_BUILD_TUTORIALS=OFF \
+  -DPXR_BUILD_IMAGING=OFF -DPXR_BUILD_USD_TOOLS=OFF -DPXR_BUILD_DOCUMENTATION=OFF \
+  -DPXR_ENABLE_PTEX_SUPPORT=OFF -DPXR_ENABLE_OPENVDB_SUPPORT=OFF \
+  -DPXR_ENABLE_USD_VALIDATION=OFF -DPXR_BUILD_OPENSUBDIV_SUPPORT=OFF \
+  -DPX_GENERATE_SYMBOL_VISIBILITY_MAP=OFF
 cmake --build build -j$(nproc)
 cmake --install build
-echo "ICUC built"
+echo "OpenUSD built"

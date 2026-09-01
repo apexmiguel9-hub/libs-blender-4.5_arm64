@@ -6,8 +6,7 @@ git clone --depth 1 --branch 1.0.14 https://github.com/fribidi/fribidi.git src
 cd src
 TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
 TARGET=aarch64-linux-android
-meson setup build \
-  --cross-file <(cat << MESONEOF
+cat > /tmp/fribidi_cross.txt << MESONEOF
 [binaries]
 c = '$TOOLCHAIN/bin/${TARGET}${API_LEVEL}-clang'
 cpp = '$TOOLCHAIN/bin/${TARGET}${API_LEVEL}-clang++'
@@ -18,10 +17,9 @@ system = 'android'
 cpu_family = 'aarch64'
 cpu = 'armv8a'
 endian = 'little'
-[properties]
-sysroot = '$TOOLCHAIN/sysroot'
 MESONEOF
-) \
+meson setup build \
+  --cross-file /tmp/fribidi_cross.txt \
   --prefix="$OUTPUT_DIR" \
   --default-library=shared \
   -Dtests=false -Ddocs=false -Dfribidi-config=false
