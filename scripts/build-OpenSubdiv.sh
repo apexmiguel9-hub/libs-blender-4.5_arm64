@@ -5,47 +5,57 @@ mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
 git clone --depth 1 --branch v3_6_0 https://github.com/PixarAnimationStudios/OpenSubdiv.git src
 cd src
 
-# Remove glLoader entirely — it requires desktop GL headers we don't have
+# Remove glLoader directory (requires desktop GL headers we don't have)
 rm -rf glLoader
 
-# Patch out the glLoader subdirectory from the top-level CMakeLists.txt
-# and remove the install() block that errors with cmake 3.31 (empty file list)
-python3 -c "
+# Patch ALL CMakeLists.txt files to remove GPU/install references
+python3 << 'PATCH'
 import re
-txt = open('CMakeLists.txt').read()
-# Remove glLoader from add_subdirectory
-txt = txt.replace('add_subdirectory(glLoader)', '# add_subdirectory(glLoader) # removed for Android')
-# Remove OPENGL_LOADER_OBJS references
-txt = re.sub(r'\\\$\{OPENGL_LOADER_OBJS\}', '', txt)
-open('CMakeLists.txt','w').write(txt)
-print('Patched top-level CMakeLists.txt')
-"
 
-# Patch osd/CMakeLists.txt — remove install blocks and the osd_gpu_obj references
-python3 -c "
-import re
-txt = open('opensubdiv/osd/CMakeLists.txt').read()
-# Remove all install() blocks (they fail with empty file lists on cmake 3.31)
+# === 1. Top-level CMakeLists.txt ===
+txt = open('CMakeLists.txt').read()
+txt = txt.replace('add_subdirectory(glLoader)', '# add_subdirectory(glLoader) # removed for Android')
+txt = re.sub(r'\$\{OPENGL_LOADER_OBJS\}', '', txt)
+open('CMakeLists.txt', 'w').write(txt)
+print('Patched: CMakeLists.txt (top-level)')
+
+# === 2. opensubdiv/CMakeLists.txt ===
+# This has $<TARGET_OBJECTS:osd_gpu_obj> at lines 159, 231, 313, 362
+txt = open('opensubdiv/CMakeLists.txt').read()
+
+# Remove osd_gpu_obj references (they cause "target not found" when GPU is disabled)
+txt = re.sub(r'\$<TARGET_OBJECTS:osd_gpu_obj>', '', txt)
+
+# Remove install() blocks — cmake 3.31 errors when file list is empty
 txt = re.sub(r'install\([^)]*\)', '# install removed for Android', txt, flags=re.DOTALL)
-# Remove osd_gpu_obj references (causes 'target not found' when GPU is disabled)
-txt = re.sub(r'\\\$\<TARGET_OBJECTS:osd_gpu_obj\>', '', txt)
+
+open('opensubdiv/CMakeLists.txt', 'w').write(txt)
+print('Patched: opensubdiv/CMakeLists.txt')
+
+# === 3. opensubdiv/osd/CMakeLists.txt ===
+txt = open('opensubdiv/osd/CMakeLists.txt').read()
+txt = re.sub(r'install\([^)]*\)', '# install removed for Android', txt, flags=re.DOTALL)
 txt = re.sub(r'add_library\(osd_gpu_obj[^)]*\)', '# osd_gpu_obj removed', txt, flags=re.DOTALL)
 txt = re.sub(r'set_target_properties\(osd_gpu_obj[^)]*\)', '# osd_gpu_obj removed', txt, flags=re.DOTALL)
-open('opensubdiv/osd/CMakeLists.txt','w').write(txt)
-print('Patched opensubdiv/osd/CMakeLists.txt')
-"
+open('opensubdiv/osd/CMakeLists.txt', 'w').write(txt)
+print('Patched: opensubdiv/osd/CMakeLists.txt')
 
-# Also patch the inner CMakeLists.txt for osd regression tests
-if [ -f regression/common/CMakeLists.txt ]; then
-  sed -i 's/add_library(regression_common_obj/# add_library(regression_common_obj/' regression/common/CMakeLists.txt 2>/dev/null || true
-fi
+# === 4. regression/common/CMakeLists.txt ===
+try:
+    txt = open('regression/common/CMakeLists.txt').read()
+    txt = re.sub(r'add_library\(regression_common_obj[^)]*\)', '# regression_common_obj removed', txt, flags=re.DOTALL)
+    open('regression/common/CMakeLists.txt', 'w').write(txt)
+    print('Patched: regression/common/CMakeLists.txt')
+except FileNotFoundError:
+    pass
+
+print('All patches applied')
+PATCH
 
 cmake -B build \
   -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM="android-$API_LEVEL" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$OUTPUT_DIR" \
-  -DCMAKE_PREFIX_PATH="$OUTPUT_DIR" \
-  -DCMAKE_FIND_ROOT_PATH="$OUTPUT_DIR" \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
   -DOSD_BUILD_TESTS=OFF -DOSD_BUILD_EXAMPLES=OFF \
   -DOSD_BUILD_PYREGRESSION=OFF -DOSD_BUILD_PYTHON=OFF \
@@ -62,18 +72,12 @@ cmake -B build \
   -DCMAKE_DISABLE_FIND_PACKAGE_Doxygen=TRUE \
   -DCMAKE_DISABLE_FIND_PACKAGE_Docutils=TRUE
 
-# Build ONLY the CPU static lib targets
-cmake --build build -j$(nproc) --target osd_static_cpu 2>/dev/null || \
-cmake --build build -j$(nproc) --target osdCPU 2>/dev/null || \
-cmake --build build -j$(nproc)
+cmake --build build -j$(nproc) --target osd_static_cpu
 
 # Manual install
 mkdir -p "$OUTPUT_DIR/lib" "$OUTPUT_DIR/include/opensubdiv"
 
 find build -name "*.a" | while read f; do
-  cp -v "$f" "$OUTPUT_DIR/lib/" 2>/dev/null || true
-done
-find build -name "*.so" | while read f; do
   cp -v "$f" "$OUTPUT_DIR/lib/" 2>/dev/null || true
 done
 
@@ -85,4 +89,4 @@ done
 find opensubdiv -maxdepth 1 -name "*.h" -exec cp {} "$OUTPUT_DIR/include/opensubdiv/" \; 2>/dev/null || true
 
 echo "OpenSubdiv built and installed to $OUTPUT_DIR"
-find "$OUTPUT_DIR/lib" -name "*.a" -o -name "*.so" | sort
+ls -lh "$OUTPUT_DIR/lib/"*.a 2>/dev/null
