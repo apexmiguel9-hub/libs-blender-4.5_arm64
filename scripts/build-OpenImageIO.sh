@@ -4,18 +4,24 @@ NDK_DIR="$1"; OUTPUT_DIR="$2"; BUILD_DIR="$3"; API_LEVEL="${4:-24}"
 mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
 git clone --depth 1 --branch v2.5.16.0 https://github.com/AcademySoftwareFoundation/OpenImageIO.git src
 cd src
+mkdir -p build
+cat > "$HOME/force_includes.h" << 'HDR'
+#pragma once
+#include <ctime>
+#include <cstdint>
+HDR
 cmake -B build \
   -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM="android-$API_LEVEL" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$OUTPUT_DIR" \
   -DCMAKE_PREFIX_PATH="$OUTPUT_DIR" \
   -DCMAKE_FIND_ROOT_PATH="$OUTPUT_DIR" \
-  -DCMAKE_CXX_FLAGS="-D_GNU_SOURCE -include time.h" \
+  -DCMAKE_CXX_FLAGS="-include /home/runner/force_includes.h" \
   -DBUILD_SHARED_LIBS=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
   -DOIIO_BUILD_TOOLS=OFF -DOIIO_BUILD_TESTS=OFF -DOIIO_BUILD_PLUGINS=OFF \
   -DUSE_PYTHON=OFF -DUSE_OPENGL=OFF -DUSE_QT=OFF \
   -DUSE_OPENVDB=OFF -DUSE_FFMPEG=OFF -DUSE_OPENCOLORIO=OFF \
-  -DUSE_OPENEXR=ON -DUSE_OPENJPEG=OFF -DUSE_LIBHEIF=OFF \
+  -DUSE_OPENEXR=OFF -DUSE_OPENJPEG=OFF -DUSE_LIBHEIF=OFF \
   -DUSE_LIBRAW=OFF -DUSE_OPENSSL=OFF \
   -DUSE_PUGIXML=OFF -DUSE_GIF=OFF -DUSE_WEBP=OFF
 cmake --build build -j$(nproc)
