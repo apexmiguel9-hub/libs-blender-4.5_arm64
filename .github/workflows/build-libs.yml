@@ -298,6 +298,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════
   collect:
     needs: [tier1, tier2, tier3, tier4]
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
