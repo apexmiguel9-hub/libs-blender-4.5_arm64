@@ -201,7 +201,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libpcre2-dev
+          sudo apt-get install -y -qq libpcre2-dev meson ninja-build
 
       - name: Build ${{ matrix.lib }}
         run: |

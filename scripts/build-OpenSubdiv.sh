@@ -4,8 +4,12 @@ NDK_DIR="$1"; OUTPUT_DIR="$2"; BUILD_DIR="$3"; API_LEVEL="${4:-24}"
 mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
 git clone --depth 1 --branch v3_6_0 https://github.com/PixarAnimationStudios/OpenSubdiv.git src
 cd src
-# Remove glLoader reference and disable all GPU backends
-sed -i 's/add_subdirectory(glLoader)//' CMakeLists.txt
+# Remove glLoader entirely
+rm -rf glLoader
+sed -i 's/add_subdirectory(glLoader)/# glLoader removed/' CMakeLists.txt
+# Patch install target to remove glLoader references
+sed -i 's/DESTINATION glLoader/# DESTINATION glLoader/' CMakeLists.txt
+sed -i '/glLoader/d' opensubdiv/osd/CMakeLists.txt
 cmake -B build \
   -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM="android-$API_LEVEL" \
