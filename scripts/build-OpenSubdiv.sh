@@ -5,49 +5,58 @@ mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
 git clone --depth 1 --branch v3_6_0 https://github.com/PixarAnimationStudios/OpenSubdiv.git src
 cd src
 
-# Remove glLoader directory (requires desktop GL headers we don't have)
 rm -rf glLoader
 
-# Patch ALL CMakeLists.txt files to remove GPU/install references
+# Nuclear patch: remove ALL install/export rules, all GPU targets, all example/tutorial targets
 python3 << 'PATCH'
-import re
+import os, re
 
-# === 1. Top-level CMakeLists.txt ===
-txt = open('CMakeLists.txt').read()
-txt = txt.replace('add_subdirectory(glLoader)', '# add_subdirectory(glLoader) # removed for Android')
-txt = re.sub(r'\$\{OPENGL_LOADER_OBJS\}', '', txt)
-open('CMakeLists.txt', 'w').write(txt)
-print('Patched: CMakeLists.txt (top-level)')
-
-# === 2. opensubdiv/CMakeLists.txt ===
-# This has $<TARGET_OBJECTS:osd_gpu_obj> at lines 159, 231, 313, 362
-txt = open('opensubdiv/CMakeLists.txt').read()
-
-# Remove osd_gpu_obj references (they cause "target not found" when GPU is disabled)
-txt = re.sub(r'\$<TARGET_OBJECTS:osd_gpu_obj>', '', txt)
-
-# Remove install() blocks — cmake 3.31 errors when file list is empty
-txt = re.sub(r'install\([^)]*\)', '# install removed for Android', txt, flags=re.DOTALL)
-
-open('opensubdiv/CMakeLists.txt', 'w').write(txt)
-print('Patched: opensubdiv/CMakeLists.txt')
-
-# === 3. opensubdiv/osd/CMakeLists.txt ===
-txt = open('opensubdiv/osd/CMakeLists.txt').read()
-txt = re.sub(r'install\([^)]*\)', '# install removed for Android', txt, flags=re.DOTALL)
-txt = re.sub(r'add_library\(osd_gpu_obj[^)]*\)', '# osd_gpu_obj removed', txt, flags=re.DOTALL)
-txt = re.sub(r'set_target_properties\(osd_gpu_obj[^)]*\)', '# osd_gpu_obj removed', txt, flags=re.DOTALL)
-open('opensubdiv/osd/CMakeLists.txt', 'w').write(txt)
-print('Patched: opensubdiv/osd/CMakeLists.txt')
-
-# === 4. regression/common/CMakeLists.txt ===
-try:
-    txt = open('regression/common/CMakeLists.txt').read()
-    txt = re.sub(r'add_library\(regression_common_obj[^)]*\)', '# regression_common_obj removed', txt, flags=re.DOTALL)
-    open('regression/common/CMakeLists.txt', 'w').write(txt)
-    print('Patched: regression/common/CMakeLists.txt')
-except FileNotFoundError:
-    pass
+for root, dirs, files in os.walk('.'):
+    for fname in files:
+        if fname == 'CMakeLists.txt':
+            fpath = os.path.join(root, fname)
+            txt = open(fpath).read()
+            original = txt
+            
+            # Remove ALL install() blocks (handles nested parens)
+            result = []
+            i = 0
+            while i < len(txt):
+                if txt[i:i+8].lower() == 'install(' or txt[i:i+9].lower() == 'install (':
+                    # Find matching closing paren
+                    depth = 0
+                    j = i
+                    while j < len(txt):
+                        if txt[j] == '(':
+                            depth += 1
+                        elif txt[j] == ')':
+                            depth -= 1
+                            if depth == 0:
+                                result.append('# install removed for Android')
+                                i = j + 1
+                                break
+                        j += 1
+                    else:
+                        result.append(txt[i])
+                        i += 1
+                else:
+                    result.append(txt[i])
+                    i += 1
+            txt = ''.join(result)
+            
+            # Remove install(EXPORT ...) blocks specifically
+            txt = re.sub(r'install\s*\(\s*EXPORT[^)]*\)', '# export install removed', txt, flags=re.DOTALL)
+            
+            # Remove osd_gpu_obj references
+            txt = txt.replace('${OPENGL_LOADER_OBJS}', '')
+            txt = re.sub(r'\$<TARGET_OBJECTS:osd_gpu_obj>', '', txt)
+            
+            # Remove regression_common_obj references
+            txt = re.sub(r'\$<TARGET_OBJECTS:regression_common_obj>', '', txt)
+            
+            if txt != original:
+                open(fpath, 'w').write(txt)
+                print(f'Patched: {fpath}')
 
 print('All patches applied')
 PATCH
@@ -57,6 +66,7 @@ cmake -B build \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM="android-$API_LEVEL" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$OUTPUT_DIR" \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+  -DCMAKE_SKIP_INSTALL_RULES=TRUE \
   -DNO_EXAMPLES=ON -DNO_TUTORIALS=ON -DNO_DOC=ON \
   -DOSD_BUILD_TESTS=OFF -DOSD_BUILD_EXAMPLES=OFF \
   -DOSD_BUILD_PYREGRESSION=OFF -DOSD_BUILD_PYTHON=OFF \
@@ -75,19 +85,13 @@ cmake -B build \
 
 cmake --build build -j$(nproc) --target osd_static_cpu
 
-# Manual install
 mkdir -p "$OUTPUT_DIR/lib" "$OUTPUT_DIR/include/opensubdiv"
-
-find build -name "*.a" | while read f; do
-  cp -v "$f" "$OUTPUT_DIR/lib/" 2>/dev/null || true
-done
+find build -name "*.a" -exec cp {} "$OUTPUT_DIR/lib/" \;
 
 for dir in osd far hbr sdc vtr bfr; do
-  if [ -d "opensubdiv/$dir" ]; then
-    cp -r "opensubdiv/$dir" "$OUTPUT_DIR/include/opensubdiv/" 2>/dev/null || true
-  fi
+  [ -d "opensubdiv/$dir" ] && cp -r "opensubdiv/$dir" "$OUTPUT_DIR/include/opensubdiv/" 2>/dev/null || true
 done
 find opensubdiv -maxdepth 1 -name "*.h" -exec cp {} "$OUTPUT_DIR/include/opensubdiv/" \; 2>/dev/null || true
 
-echo "OpenSubdiv built and installed to $OUTPUT_DIR"
+echo "OpenSubdiv built"
 ls -lh "$OUTPUT_DIR/lib/"*.a 2>/dev/null
