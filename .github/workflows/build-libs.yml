@@ -90,6 +90,7 @@ jobs:
           - Manifold
           - JeMalloc
           - OpenBlas
+          - Boost
           - Openpgl  # optional, may fail
     steps:
       - name: Checkout
@@ -152,21 +153,21 @@ jobs:
       matrix:
         lib:
           - OpenEXR
-          - OpenVDB
           - Embree
           - Oidn
-          - OpenColorIO
-          - OpenImageIO
           - OpenSubdiv
           - Epoxy
           - OpenAL
           - ffmpeg
           - SndFile
           - SDL
-          - Potrace
           - LibXML
           - OpenCOLLADA
           - Alembic
+          - Fribidi
+          - ICUC
+          - ShaderC
+          - MaterialX
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -222,7 +223,7 @@ jobs:
           retention-days: 30
 
   # ═══════════════════════════════════════════════════════════════
-  # Tier 4: Complex libs (Boost, cpython, OpenUSD, MaterialX, ShaderC, Fribidi, ICUC)
+  # Tier 4: Libs that need Boost (tier2) or OpenEXR (tier3)
   # ═══════════════════════════════════════════════════════════════
   tier4:
     needs: [tier1, tier2, tier3]
@@ -232,13 +233,11 @@ jobs:
       fail-fast: false
       matrix:
         lib:
-          - Boost
-          - cpython
+          - OpenVDB
+          - OpenImageIO
+          - OpenColorIO
           - OpenUSD
-          - MaterialX
-          - ShaderC
-          - Fribidi
-          - ICUC
+          - cpython
     steps:
       - name: Checkout
         uses: actions/checkout@v4

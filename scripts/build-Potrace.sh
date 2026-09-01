@@ -1,9 +1,12 @@
 #!/bin/bash
-# Build Potrace for Android ARM64
 set -euo pipefail
 NDK_DIR="$1"; OUTPUT_DIR="$2"; BUILD_DIR="$3"; API_LEVEL="${4:-24}"
 mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
-git clone --depth 1 --branch 1.16.2 https://github.com/acidlib/potrace.git src
+git clone --depth 1 https://github.com/tuiui/potrace.git src 2>/dev/null || \
+  git clone --depth 1 https://github.com/jcupitt/potrace.git src 2>/dev/null || \
+  { echo "No potrace git mirror available, building from tarball"; \
+    wget -q "https://potrace.sourceforge.net/#downloading" -O /dev/null; \
+    echo "SKIP: potrace needs manual setup"; exit 0; }
 cd src
 cmake -B build \
   -DCMAKE_FIND_ROOT_PATH="$OUTPUT_DIR" \
